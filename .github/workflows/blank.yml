@@ -16,18 +16,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract ZIP
+      - name: Extract project ZIP
         shell: bash
         run: |
           set -e
           ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
-
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP project file found."
+            echo "No ZIP file found"
             exit 1
           fi
-
-          echo "Using: $ZIP_FILE"
           mkdir -p project
           unzip -o "$ZIP_FILE" -d project
 
@@ -37,51 +34,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
-        shell: bash
-        run: |
-          set -e
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-
-          SDKMANAGER="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager not found."
-            exit 1
-          fi
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
       - name: Find Android project
         shell: bash
         run: |
           set -e
-
           PROJECT_DIR="$(find project -type f \( -name settings.gradle -o -name settings.gradle.kts \) -printf '%h\n' | head -n 1)"
-
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project not found."
-            find project -maxdepth 5 -type f | head -n 100
+            echo "Android project not found"
             exit 1
           fi
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Configure Java and Kotlin JVM targets
+      - name: Configure Java compile target
         shell: bash
         run: |
           cat > "$RUNNER_TEMP/fhwifi-init.gradle" <<'EOF'
@@ -89,16 +58,6 @@ jobs:
               tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
                   sourceCompatibility = '17'
                   targetCompatibility = '17'
-              }
-
-              tasks.configureEach { task ->
-                  if (task.class.name.contains('KotlinCompile')) {
-                      task.doFirst {
-                          if (task.hasProperty('kotlinOptions')) {
-                              task.kotlinOptions.jvmTarget = '17'
-                          }
-                      }
-                  }
               }
           }
           EOF
@@ -114,16 +73,12 @@ jobs:
         shell: bash
         run: |
           set -e
-
           APK_PATH="$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' | head -n 1)"
-
           if [ -z "$APK_PATH" ]; then
-            echo "ERROR: APK was not generated."
+            echo "APK not found"
             exit 1
           fi
-
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
-          echo "APK found: $APK_PATH"
 
       - name: Upload FH WIFI APK
         uses: actions/upload-artifact@v4
