@@ -13,114 +13,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find and extract ZIP
-        shell: bash
+      - name: Extract project ZIP
         run: |
           set -e
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP project file found."
-            exit 1
-          fi
-
-          mkdir -p project
+          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
+          test -n "$ZIP_FILE"
+          mkdir project
           unzip -o "$ZIP_FILE" -d project
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Install Android SDK
-        shell: bash
-        run: |
-          set -e
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-
-          SDKMANAGER="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager not found."
-            exit 1
-          fi
-
-          yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Find Android project
-        shell: bash
-        run: |
-          set -e
-          PROJECT_DIR="$(find project -type f \( -name settings.gradle -o -name settings.gradle.kts \) -printf '%h\n' | head -n 1)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project not found."
-            find project -maxdepth 5 -type f | head -n 100
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Configure Java and Kotlin targets
-        shell: bash
+      - name: Find Android project
         run: |
-          cat > "$RUNNER_TEMP/fhwifi.init.gradle" <<'EOF'
-          allprojects {
-              tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
-                  sourceCompatibility = '17'
-                  targetCompatibility = '17'
-              }
+          PROJECT_DIR=$(find project -type f \( -name settings.gradle -o -name settings.gradle.kts \) -printf '%h\n' | head -n 1)
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-              tasks.configureEach { task ->
-                  if (task.class.name.contains('KotlinCompile')) {
-                      task.doFirst {
-                          if (task.hasProperty('kotlinOptions')) {
-                              task.kotlinOptions.jvmTarget = '17'
-                          }
-                      }
-                  }
-              }
-          }
-          EOF
+      - name: Build APK
+        run: gradle -p "$PROJECT_DIR" assembleDebug
 
-      - name: Build FH WIFI APK
-        shell: bash
-        run: |
-          gradle -p "$PROJECT_DIR" \
-            --init-script "$RUNNER_TEMP/fhwifi.init.gradle" \
-            assembleDebug
-
-      - name: Find APK
-        shell: bash
-        run: |
-          set -e
-          APK_PATH="$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' | head -n 1)"
-
-          if [ -z "$APK_PATH" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
-
-      - name: Upload FH WIFI APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: FH-WIFI-APK
-          path: ${{ env.APK_PATH }}
+          path: project/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
